@@ -1,0 +1,4 @@
+[yaml-cpp]
+  url=git@github.com:triptix-tech/yaml-cpp.git
+  branch=main
+  commit=1d8ca1f35eb3a9c9142462b28282a848e5d29a91

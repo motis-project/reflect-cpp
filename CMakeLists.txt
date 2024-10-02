@@ -127,7 +127,7 @@ if (REFLECTCPP_XML)
 endif ()
 
 if (REFLECTCPP_YAML)
-    find_package(yaml-cpp CONFIG REQUIRED)
+    # find_package(yaml-cpp CONFIG REQUIRED)
     target_link_libraries(reflectcpp INTERFACE yaml-cpp::yaml-cpp)
 endif ()
 
@@ -146,37 +146,3 @@ if (REFLECTCPP_BUILD_BENCHMARKS)
     target_link_libraries(reflectcpp INTERFACE benchmark::benchmark simdjson::simdjson)
     add_subdirectory(benchmarks)
 endif ()
-
-include(GNUInstallDirs)
-include(CMakePackageConfigHelpers)
-
-configure_package_config_file(reflectcpp-config.cmake.in
-  ${CMAKE_CURRENT_BINARY_DIR}/reflectcpp-config.cmake
-  INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/reflectcpp
-  )
-
-install(
-    FILES "${CMAKE_CURRENT_BINARY_DIR}/reflectcpp-config.cmake"
-    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/reflectcpp"
-)
-
-file(GLOB_RECURSE RFL_HEADERS RELATIVE ${CMAKE_CURRENT_LIST_DIR} "${CMAKE_CURRENT_LIST_DIR}/include/*" )
-
-target_sources(reflectcpp
-    PUBLIC
-    FILE_SET reflectcpp_headers
-    TYPE HEADERS
-    BASE_DIRS $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
-    FILES ${RFL_HEADERS})
-
-install(
-    TARGETS reflectcpp
-    EXPORT reflectcpp-exports
-    FILE_SET reflectcpp_headers DESTINATION ${INCLUDE_INSTALL_DIR}
-    )
-
-install(
-    EXPORT reflectcpp-exports
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/reflectcpp
-    NAMESPACE reflectcpp::
-)
