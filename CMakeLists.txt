@@ -8,7 +8,7 @@ option(REFLECTCPP_FLEXBUFFERS "Enable flexbuffers support" OFF)
 option(REFLECTCPP_MSGPACK "Enable msgpack support" OFF)
 option(REFLECTCPP_XML "Enable XML support" OFF)
 option(REFLECTCPP_TOML "Enable TOML support" OFF)
-option(REFLECTCPP_YAML "Enable YAML support" OFF)
+option(REFLECTCPP_YAML "Enable YAML support" ON)
 
 option(REFLECTCPP_BUILD_BENCHMARKS "Build benchmarks" OFF)
 option(REFLECTCPP_BUILD_TESTS "Build tests" OFF)
