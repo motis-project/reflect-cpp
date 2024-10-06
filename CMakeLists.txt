@@ -59,7 +59,7 @@ if(REFLECTCPP_USE_BUNDLED_DEPENDENCIES)
     endif()
 
     target_include_directories(
-        reflectcpp PUBLIC
+        reflectcpp SYSTEM PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/rfl/thirdparty>)
@@ -73,7 +73,7 @@ else()
     target_sources(reflectcpp PRIVATE src/reflectcpp.cpp)
 
     target_include_directories(
-        reflectcpp PUBLIC
+        reflectcpp SYSTEM PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>)
 
