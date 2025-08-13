@@ -10,6 +10,7 @@
 
 #include "../Processors.hpp"
 #include "../Ref.hpp"
+#include "../internal/ptr_cast.hpp"
 #include "../parsing/Parent.hpp"
 #include "Parser.hpp"
 
@@ -31,7 +32,7 @@ std::vector<uint8_t> to_buffer(const auto& _obj) {
 template <class... Ps>
 std::vector<char> write(const auto& _obj) {
   const auto buffer = to_buffer<Ps...>(_obj);
-  const auto data = reinterpret_cast<const char*>(buffer.data());
+  const auto data = internal::ptr_cast<const char*>(buffer.data());
   return std::vector<char>(data, data + buffer.size());
 }
 
@@ -39,7 +40,7 @@ std::vector<char> write(const auto& _obj) {
 template <class... Ps>
 std::ostream& write(const auto& _obj, std::ostream& _stream) {
   const auto buffer = to_buffer<Ps...>(_obj);
-  const auto data = reinterpret_cast<const char*>(buffer.data());
+  const auto data = internal::ptr_cast<const char*>(buffer.data());
   _stream.write(data, buffer.size());
   return _stream;
 }

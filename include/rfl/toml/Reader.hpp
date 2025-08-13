@@ -25,14 +25,13 @@ struct Reader {
   using InputVarType = ::toml::node*;
 
   template <class T>
-  static constexpr bool has_custom_constructor = (requires(InputVarType var) {
-    T::from_toml_obj(var);
-  });
+  static constexpr bool has_custom_constructor =
+      (requires(InputVarType var) { T::from_toml_obj(var); });
 
   rfl::Result<InputVarType> get_field_from_array(
       const size_t _idx, const InputArrayType _arr) const noexcept {
     if (_idx >= _arr->size()) {
-      return rfl::Error("Index " + std::to_string(_idx) + " of of bounds.");
+      return error("Index " + std::to_string(_idx) + " of of bounds.");
     }
     return _arr->get(_idx);
   }
@@ -41,7 +40,7 @@ struct Reader {
       const std::string& _name, const InputObjectType& _obj) const noexcept {
     auto var = (*_obj)[_name];
     if (!var) {
-      return rfl::Error("Object contains no field named '" + _name + "'.");
+      return error("Object contains no field named '" + _name + "'.");
     }
     return var.node();
   }
@@ -55,25 +54,25 @@ struct Reader {
     if constexpr (std::is_same<std::remove_cvref_t<T>, std::string>()) {
       const auto ptr = _var->as<std::string>();
       if (!ptr) {
-        return Error("Could not cast the node to std::string!");
+        return error("Could not cast the node to std::string!");
       }
       return **ptr;
     } else if constexpr (std::is_same<std::remove_cvref_t<T>, bool>()) {
       const auto ptr = _var->as<bool>();
       if (!ptr) {
-        return Error("Could not cast the node to bool!");
+        return error("Could not cast the node to bool!");
       }
       return **ptr;
     } else if constexpr (std::is_floating_point<std::remove_cvref_t<T>>()) {
       const auto ptr = _var->as<double>();
       if (!ptr) {
-        return Error("Could not cast the node to double!");
+        return error("Could not cast the node to double!");
       }
       return static_cast<std::remove_cvref_t<T>>(**ptr);
     } else if constexpr (std::is_integral<std::remove_cvref_t<T>>()) {
       const auto ptr = _var->as<int64_t>();
       if (!ptr) {
-        return Error("Could not cast the node to int64_t!");
+        return error("Could not cast the node to int64_t!");
       }
       return static_cast<std::remove_cvref_t<T>>(**ptr);
     } else {
@@ -85,7 +84,7 @@ struct Reader {
       const InputVarType& _var) const noexcept {
     const auto ptr = _var->as_array();
     if (!ptr) {
-      return rfl::Error("Could not cast to an array!");
+      return error("Could not cast to an array!");
     }
     return ptr;
   }
@@ -115,7 +114,7 @@ struct Reader {
       const InputVarType& _var) const noexcept {
     const auto ptr = _var->as_table();
     if (!ptr) {
-      return rfl::Error("Could not cast to a table!");
+      return error("Could not cast to a table!");
     }
     return ptr;
   }
@@ -126,7 +125,7 @@ struct Reader {
     try {
       return T::from_toml_obj(_var);
     } catch (std::exception& e) {
-      return rfl::Error(e.what());
+      return error(e.what());
     }
   }
 };

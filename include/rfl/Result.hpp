@@ -1,25 +1,30 @@
 #ifndef RFL_RESULT_HPP_
 #define RFL_RESULT_HPP_
 
+#ifdef REFLECTCPP_USE_STD_EXPECTED
+#include <expected>
+#endif
+
 #include <algorithm>
 #include <array>
+#include <functional>
 #include <iostream>
+#include <new>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
 
-#include "internal/is_array.hpp"
-#include "internal/to_std_array.hpp"
-
 namespace rfl {
 
-/// To be returned
+/// Defines the error class to be returned when something went wrong
 class Error {
  public:
   Error(const std::string& _what) : what_(_what) {}
 
-  ~Error() = default;
+  Error(const Error& e) = default;
+
+  Error& operator=(const Error&) = default;
 
   /// Returns the error message, equivalent to .what() in std::exception.
   const std::string& what() const { return what_; }
@@ -29,9 +34,44 @@ class Error {
   std::string what_;
 };
 
-/// Can be used when we are simply interested in whether an operation was
-/// successful.
+/// To be returned when there is nothing to return, but there might be an error.
 struct Nothing {};
+
+/// This implementation is for cases where std::expected is defined
+#ifdef REFLECTCPP_USE_STD_EXPECTED
+
+template <class E>
+using Unexpected = std::unexpected<E>;
+
+template <class T>
+using Result = std::expected<T, rfl::Error>;
+
+/// This implementation is for cases where std::expected is not defined
+#else  // REFLECTCPP_USE_STD_EXPECTED
+
+template <class E>
+struct Unexpected {
+  Unexpected(E&& _err) : err_{std::forward<E>(_err)} {}
+
+  Unexpected(const E& _err) : err_{_err} {}
+
+  Unexpected(Unexpected&&) = default;
+
+  Unexpected(const Unexpected&) = default;
+
+  Unexpected& operator=(Unexpected&&) = default;
+
+  Unexpected& operator=(const Unexpected&) = default;
+
+  const E& error() const& { return err_; }
+
+  E&& error() && { return std::move(err_); }
+
+  E& error() & { return err_; }
+
+ private:
+  E err_;
+};
 
 /// The Result class is used for monadic error handling.
 template <class T>
@@ -41,7 +81,9 @@ class Result {
   using TOrErr = std::array<unsigned char, std::max(sizeof(T), sizeof(Error))>;
 
  public:
-  using Type = T;
+  // using Type = T;
+  using value_type = T;
+  using error_type = rfl::Error;
 
   Result(const T& _val) : success_(true) { new (&get_t()) T(_val); }
 
@@ -49,10 +91,11 @@ class Result {
     new (&get_t()) T(std::move(_val));
   }
 
-  Result(const Error& _err) : success_(false) { new (&get_err()) Error(_err); }
-
-  Result(Error&& _err) noexcept : success_(false) {
-    new (&get_err()) Error(std::move(_err));
+  Result(const Unexpected<Error>& _err) : success_(false) {
+    new (&get_err()) Error(_err.error());
+  }
+  Result(Unexpected<Error>&& _err) : success_(false) {
+    new (&get_err()) Error(std::move(_err.error()));
   }
 
   Result(Result<T>&& _other) noexcept : success_(_other.success_) {
@@ -66,7 +109,7 @@ class Result {
   template <class U, typename std::enable_if<std::is_convertible_v<U, T>,
                                              bool>::type = true>
   Result(Result<U>&& _other) : success_(_other && true) {
-    auto temp = std::forward<Result<U>>(_other).transform(
+    auto temp = std::forward<Result<U> >(_other).transform(
         [](U&& _u) { return T(std::forward<U>(_u)); });
     move_from_other(temp);
   }
@@ -80,29 +123,21 @@ class Result {
 
   ~Result() { destroy(); }
 
-  /// Returns Result<U>, if successful and error otherwise.
-  /// Inspired by .and(...) in the Rust std::result type.
-  template <class U>
-  Result<U> and_other(const Result<U>& _r) const noexcept {
-    const auto f = [&](const auto& _) { return _r; };
-    return and_then(f);
-  }
-
   /// Monadic operation - F must be a function of type T -> Result<U>.
   template <class F>
-  auto and_then(const F& _f) {
+  auto and_then(const F& _f) && {
     /// Result_U is expected to be of type Result<U>.
     using Result_U = typename std::invoke_result<F, T>::type;
     if (success_) {
-      return Result_U(_f(std::forward<T>(get_t())));
+      return Result_U(_f(std::move(*this).get_t()));
     } else {
-      return Result_U(std::forward<Error>(get_err()));
+      return Result_U(std::move(*this).get_err());
     }
   }
 
   /// Monadic operation - F must be a function of type T -> Result<U>.
   template <class F>
-  auto and_then(const F& _f) const {
+  auto and_then(const F& _f) const& {
     /// Result_U is expected to be of type Result<U>.
     using Result_U = typename std::invoke_result<F, T>::type;
     if (success_) {
@@ -112,66 +147,20 @@ class Result {
     }
   }
 
-  /// Results types can be iterated over, which even make it possible to use
-  /// them within a std::range.
-  T* begin() noexcept {
-    if (success_) {
-      return &get_t();
-    } else {
-      return nullptr;
-    }
-  }
-
-  /// Results types can be iterated over, which even make it possible to use
-  /// them within a std::range.
-  const T* begin() const noexcept {
-    if (success_) {
-      return &get_t();
-    } else {
-      return nullptr;
-    }
-  }
-
-  /// Results types can be iterated over, which even make it possible to use
-  /// them within a std::range.
-  T* end() noexcept {
-    if (success_) {
-      return &get_t() + 1;
-    } else {
-      return nullptr;
-    }
-  }
-
-  /// Results types can be iterated over, which even make it possible to use
-  /// them within a std::range.
-  const T* end() const noexcept {
-    if (success_) {
-      return &get_t() + 1;
-    } else {
-      return nullptr;
-    }
-  }
-
-  /// Returns an std::optional<error> if this does in fact contain an error
-  /// or std::nullopt otherwise.
-  std::optional<Error> error() const noexcept {
-    if (success_) {
-      return std::nullopt;
-    } else {
-      return get_err();
-    }
-  }
-
   /// Returns true if the result contains a value, false otherwise.
   operator bool() const noexcept { return success_; }
 
   /// Allows access to the underlying value. Careful: Will result in undefined
   /// behavior, if the result contains an error.
-  T& operator*() noexcept { return get_t(); }
+  T&& operator*() && noexcept { return std::move(*this).get_t(); }
+
+  /// Allows access to the underlying value. Careful: Will result in undefined
+  /// behavior, if the result contains an error.
+  T& operator*() & noexcept { return get_t(); }
 
   /// Allows read access to the underlying value. Careful: Will result in
   /// undefined behavior, if the result contains an error.
-  const T& operator*() const noexcept { return get_t(); }
+  const T& operator*() const& noexcept { return get_t(); }
 
   /// Assigns the underlying object.
   Result<T>& operator=(const Result<T>& _other) {
@@ -195,6 +184,20 @@ class Result {
     return *this;
   }
 
+  Result<T>& operator=(Unexpected<Error>&& _err) noexcept {
+    destroy();
+    success_ = false;
+    new (&get_err()) Error(_err.error());
+    return *this;
+  }
+
+  Result<T>& operator=(const Unexpected<Error>& _err) noexcept {
+    destroy();
+    success_ = false;
+    new (&get_err()) Error(_err.error());
+    return *this;
+  }
+
   /// Assigns the underlying object.
   template <class U, typename std::enable_if<std::is_convertible_v<U, T>,
                                              bool>::type = true>
@@ -207,18 +210,18 @@ class Result {
   /// Expects a function that takes of type Error -> Result<T> and returns
   /// Result<T>.
   template <class F>
-  Result<T> or_else(const F& _f) {
+  Result<T> or_else(const F& _f) && {
     if (success_) {
-      return std::forward<T>(get_t());
+      return std::move(*this).get_t();
     } else {
-      return _f(std::forward<Error>(get_err()));
+      return _f(std::move(*this).get_err());
     }
   }
 
   /// Expects a function that takes of type Error -> Result<T> and returns
   /// Result<T>.
   template <class F>
-  Result<T> or_else(const F& _f) const {
+  Result<T> or_else(const F& _f) const& {
     if (success_) {
       return get_t();
     } else {
@@ -226,28 +229,21 @@ class Result {
     }
   }
 
-  /// Returns the value contained if successful or the provided result r if
-  /// not.
-  Result<T> or_other(const Result<T>& _r) const noexcept {
-    const auto f = [&](const auto& _) { return _r; };
-    return or_else(f);
-  }
-
   /// Functor operation - F must be a function of type T -> U.
   template <class F>
-  auto transform(const F& _f) {
+  auto transform(const F& _f) && {
     /// Result_U is expected to be of type Result<U>.
-    using U = typename std::invoke_result<F, T>::type;
+    using U = std::invoke_result_t<F, T>;
     if (success_) {
-      return rfl::Result<U>(_f(std::forward<T>(get_t())));
+      return rfl::Result<U>(_f(std::move(*this).get_t()));
     } else {
-      return rfl::Result<U>(std::forward<Error>(get_err()));
+      return rfl::Result<U>(rfl::Unexpected(std::move(*this).get_err()));
     }
   }
 
   /// Functor operation - F must be a function of type T -> U.
   template <class F>
-  auto transform(const F& _f) const {
+  auto transform(const F& _f) const& {
     /// Result_U is expected to be of type Result<U>.
     using U = typename std::invoke_result<F, T>::type;
     if (success_) {
@@ -259,7 +255,17 @@ class Result {
 
   /// Returns the value if the result does not contain an error, throws an
   /// exceptions if not. Similar to .unwrap() in Rust.
-  T& value() {
+  T&& value() && {
+    if (success_) {
+      return std::move(*this).get_t();
+    } else {
+      throw std::runtime_error(get_err().what());
+    }
+  }
+
+  /// Returns the value if the result does not contain an error, throws an
+  /// exceptions if not. Similar to .unwrap() in Rust.
+  T& value() & {
     if (success_) {
       return get_t();
     } else {
@@ -269,7 +275,7 @@ class Result {
 
   /// Returns the value if the result does not contain an error, throws an
   /// exceptions if not. Similar to .unwrap() in Rust.
-  const T& value() const {
+  const T& value() const& {
     if (success_) {
       return get_t();
     } else {
@@ -278,20 +284,86 @@ class Result {
   }
 
   /// Returns the value or a default.
-  T value_or(T&& _default) noexcept {
+  T&& value_or(T&& _default) && noexcept {
     if (success_) {
-      return std::forward<T>(get_t());
+      return std::move(*this).get_t();
     } else {
       return std::forward<T>(_default);
     }
   }
 
   /// Returns the value or a default.
-  T value_or(const T& _default) const noexcept {
+  T value_or(const T& _default) const& noexcept {
     if (success_) {
       return get_t();
     } else {
       return _default;
+    }
+  }
+
+  template <class G = rfl::Error>
+  rfl::Error error_or(G&& _default) && {
+    if (success_) {
+      return std::forward<G>(_default);
+    } else {
+      return std::move(*this).get_err();
+    }
+  }
+
+  //  As specified by the standard :
+  //  https://en.cppreference.com/w/cpp/utility/expected
+  //  Observers
+  template <class G = rfl::Error>
+  rfl::Error error_or(G&& _default) const& {
+    if (success_) {
+      return std::forward<G>(_default);
+    } else {
+      return get_err();
+    }
+  }
+
+  bool has_value() const noexcept { return success_; }
+
+  Error& error() && {
+    if (success_) throw std::runtime_error("Expected does not contain value");
+    return std::move(*this).get_err();
+  }
+
+  Error& error() & {
+    if (success_) throw std::runtime_error("Expected does not contain value");
+    return get_err();
+  }
+
+  const Error& error() const& {
+    if (success_) throw std::runtime_error("Expected does not contain value");
+    return get_err();
+  }
+
+  T* operator->() noexcept { return &get_t(); }
+
+  const T* operator->() const noexcept { return &get_t(); }
+
+  template <class F>
+  rfl::Result<T> transform_error(F&& f) && {
+    static_assert(
+        std::is_same<std::invoke_result_t<F, rfl::Error>, rfl::Error>(),
+        "A function passed to transform_error must return an error.");
+    if (!has_value()) {
+      return rfl::Result<T>{std::invoke(f, std::move(*this).get_err())};
+    } else {
+      return rfl::Result<T>{std::move(*this).value()};
+    }
+  }
+
+  template <class F>
+  rfl::Result<T> transform_error(F&& f) const& {
+    static_assert(
+        std::is_same<std::invoke_result_t<F, rfl::Error>, rfl::Error>(),
+        "A function passed to transform_error must return an error.");
+    if (!has_value()) {
+      return rfl::Result<T>{std::invoke(f, get_err())};
+    } else {
+      return rfl::Result<T>{value()};
     }
   }
 
@@ -306,7 +378,7 @@ class Result {
 
   void destroy() {
     if (success_) {
-      if constexpr (std::is_destructible_v<T> /*&& !internal::is_array_v<T>*/) {
+      if constexpr (std::is_destructible_v<std::remove_cv_t<T> >) {
         get_t().~T();
       }
     } else {
@@ -314,20 +386,28 @@ class Result {
     }
   }
 
-  T& get_t() noexcept {
-    return *std::launder((reinterpret_cast<T*>(t_or_err_.data())));
+  T&& get_t() && noexcept {
+    return std::move(*std::launder(reinterpret_cast<T*>(t_or_err_.data())));
   }
 
-  const T& get_t() const noexcept {
-    return *std::launder((reinterpret_cast<const T*>(t_or_err_.data())));
+  T& get_t() & noexcept {
+    return *std::launder(reinterpret_cast<T*>(t_or_err_.data()));
   }
 
-  Error& get_err() noexcept {
-    return *std::launder((reinterpret_cast<Error*>(t_or_err_.data())));
+  const T& get_t() const& noexcept {
+    return *std::launder(reinterpret_cast<const T*>(t_or_err_.data()));
   }
 
-  const Error& get_err() const noexcept {
-    return *std::launder((reinterpret_cast<const Error*>(t_or_err_.data())));
+  Error&& get_err() && noexcept {
+    return std::move(*std::launder(reinterpret_cast<Error*>(t_or_err_.data())));
+  }
+
+  Error& get_err() & noexcept {
+    return *std::launder(reinterpret_cast<Error*>(t_or_err_.data()));
+  }
+
+  const Error& get_err() const& noexcept {
+    return *std::launder(reinterpret_cast<const Error*>(t_or_err_.data()));
   }
 
   void move_from_other(Result<T>& _other) noexcept {
@@ -337,14 +417,24 @@ class Result {
       new (&get_err()) Error(std::move(_other.get_err()));
     }
   }
-
- private:
   /// Signifies whether this was a success.
   bool success_;
 
   /// The underlying data, can either be T or Error.
   alignas(std::max(alignof(T), alignof(Error))) TOrErr t_or_err_;
 };
+
+#endif
+
+/// Shorthand for unexpected error.
+inline Unexpected<Error> error(const std::string& _what) {
+  return Unexpected<Error>(Error(_what));
+}
+
+/// Shorthand for unexpected error.
+inline Unexpected<Error> error(const Error& _err) {
+  return Unexpected<Error>(_err);
+}
 
 }  // namespace rfl
 

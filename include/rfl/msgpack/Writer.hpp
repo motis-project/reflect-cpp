@@ -14,8 +14,10 @@
 #include <vector>
 
 #include "../Box.hpp"
+#include "../Bytestring.hpp"
 #include "../Ref.hpp"
 #include "../Result.hpp"
+#include "../Vectorstring.hpp"
 #include "../always_false.hpp"
 
 namespace rfl::msgpack {
@@ -32,22 +34,15 @@ class Writer {
   using OutputObjectType = MsgpackOutputObject;
   using OutputVarType = MsgpackOutputVar;
 
-  Writer(msgpack_packer* _pk) : pk_(_pk) {}
+  Writer(msgpack_packer* _pk);
 
-  ~Writer() = default;
+  ~Writer();
 
-  OutputArrayType array_as_root(const size_t _size) const noexcept {
-    return new_array(_size);
-  }
+  OutputArrayType array_as_root(const size_t _size) const noexcept;
 
-  OutputObjectType object_as_root(const size_t _size) const noexcept {
-    return new_object(_size);
-  }
+  OutputObjectType object_as_root(const size_t _size) const noexcept;
 
-  OutputVarType null_as_root() const noexcept {
-    msgpack_pack_nil(pk_);
-    return OutputVarType{};
-  }
+  OutputVarType null_as_root() const noexcept;
 
   template <class T>
   OutputVarType value_as_root(const T& _var) const noexcept {
@@ -55,30 +50,18 @@ class Writer {
   }
 
   OutputArrayType add_array_to_array(const size_t _size,
-                                     OutputArrayType* _parent) const noexcept {
-    return new_array(_size);
-  }
+                                     OutputArrayType* _parent) const noexcept;
 
   OutputArrayType add_array_to_object(
       const std::string_view& _name, const size_t _size,
-      OutputObjectType* _parent) const noexcept {
-    msgpack_pack_str(pk_, _name.size());
-    msgpack_pack_str_body(pk_, _name.data(), _name.size());
-    return new_array(_size);
-  }
+      OutputObjectType* _parent) const noexcept;
 
   OutputObjectType add_object_to_array(
-      const size_t _size, OutputArrayType* _parent) const noexcept {
-    return new_object(_size);
-  }
+      const size_t _size, OutputArrayType* _parent) const noexcept;
 
   OutputObjectType add_object_to_object(
       const std::string_view& _name, const size_t _size,
-      OutputObjectType* _parent) const noexcept {
-    msgpack_pack_str(pk_, _name.size());
-    msgpack_pack_str_body(pk_, _name.data(), _name.size());
-    return new_object(_size);
-  }
+      OutputObjectType* _parent) const noexcept;
 
   template <class T>
   OutputVarType add_value_to_array(const T& _var,
@@ -95,33 +78,19 @@ class Writer {
     return new_value(_var);
   }
 
-  OutputVarType add_null_to_array(OutputArrayType* _parent) const noexcept {
-    msgpack_pack_nil(pk_);
-    return OutputVarType{};
-  }
+  OutputVarType add_null_to_array(OutputArrayType* _parent) const noexcept;
 
   OutputVarType add_null_to_object(const std::string_view& _name,
-                                   OutputObjectType* _parent) const noexcept {
-    msgpack_pack_str(pk_, _name.size());
-    msgpack_pack_str_body(pk_, _name.data(), _name.size());
-    msgpack_pack_nil(pk_);
-    return OutputVarType{};
-  }
+                                   OutputObjectType* _parent) const noexcept;
 
-  void end_array(OutputArrayType* _arr) const noexcept {}
+  void end_array(OutputArrayType* _arr) const noexcept;
 
-  void end_object(OutputObjectType* _obj) const noexcept {}
+  void end_object(OutputObjectType* _obj) const noexcept;
 
  private:
-  OutputArrayType new_array(const size_t _size) const noexcept {
-    msgpack_pack_array(pk_, _size);
-    return OutputArrayType{};
-  }
+  OutputArrayType new_array(const size_t _size) const noexcept;
 
-  OutputObjectType new_object(const size_t _size) const noexcept {
-    msgpack_pack_map(pk_, _size);
-    return OutputObjectType{};
-  }
+  OutputObjectType new_object(const size_t _size) const noexcept;
 
   template <class T>
   OutputVarType new_value(const T& _var) const noexcept {
@@ -129,9 +98,9 @@ class Writer {
     if constexpr (std::is_same<Type, std::string>()) {
       msgpack_pack_str(pk_, _var.size());
       msgpack_pack_str_body(pk_, _var.c_str(), _var.size());
-    } else if constexpr (std::is_same<Type, rfl::Bytestring>()) {
+    } else if constexpr (std::is_same<Type, rfl::Bytestring>() || std::is_same<Type, rfl::Vectorstring>()) {
       msgpack_pack_bin(pk_, _var.size());
-      msgpack_pack_bin_body(pk_, _var.c_str(), _var.size());
+      msgpack_pack_bin_body(pk_, _var.data(), _var.size());
     } else if constexpr (std::is_same<Type, bool>()) {
       if (_var) {
         msgpack_pack_true(pk_);
@@ -155,4 +124,4 @@ class Writer {
 
 }  // namespace rfl::msgpack
 
-#endif  // MSGPACK_PARSER_HPP_
+#endif

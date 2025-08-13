@@ -4,7 +4,6 @@
 #include <compare>
 #include <cstdint>
 #include <functional>
-#include <limits>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -14,6 +13,7 @@
 #include "Result.hpp"
 #include "Tuple.hpp"
 #include "internal/StringLiteral.hpp"
+#include "internal/find_index.hpp"
 #include "internal/no_duplicate_field_names.hpp"
 
 namespace rfl {
@@ -28,10 +28,8 @@ class Literal {
   using FieldsType = rfl::Tuple<LiteralHelper<fields_>...>;
 
  public:
-  using ValueType =
-      std::conditional_t<sizeof...(fields_) <=
-                             std::numeric_limits<std::uint8_t>::max(),
-                         std::uint8_t, std::uint16_t>;
+  using ValueType = std::conditional_t<sizeof...(fields_) <= 255, std::uint8_t,
+                                       std::uint16_t>;
 
   /// The number of different fields or different options that the literal
   /// can assume.
@@ -78,7 +76,7 @@ class Literal {
   /// Constructs a new Literal.
   static Result<Literal<fields_...>> from_value(ValueType _value) {
     if (_value >= num_fields_) {
-      return Error("Value cannot exceed number of fields.");
+      return error("Value cannot exceed number of fields.");
     }
     return Literal<fields_...>(_value);
   }
@@ -98,31 +96,24 @@ class Literal {
 
   /// Determines whether the literal contains any of the strings in the other
   /// literal at compile time.
-  template <class OtherLiteralType, int _i = 0>
+  template <class OtherLiteralType>
   static constexpr bool contains_any() {
-    if constexpr (_i == num_fields_) {
-      return false;
-    } else {
-      constexpr auto name = find_name_within_own_fields<_i>();
-      return OtherLiteralType::template contains<name>() ||
-             contains_any<OtherLiteralType, _i + 1>();
-    }
+    return []<int... _is>(const std::integer_sequence<int, _is...>&) {
+      return (false || ... ||
+              OtherLiteralType::template contains<
+                  find_name_within_own_fields<_is>()>());
+    }(std::make_integer_sequence<int, num_fields_>());
   }
 
   /// Determines whether the literal contains all of the strings in the other
   /// literal at compile time.
-  template <class OtherLiteralType, int _i = 0, int _n_found = 0>
+  template <class OtherLiteralType>
   static constexpr bool contains_all() {
-    if constexpr (_i == num_fields_) {
-      return _n_found == OtherLiteralType::num_fields_;
-    } else {
-      constexpr auto name = find_name_within_own_fields<_i>();
-      if constexpr (OtherLiteralType::template contains<name>()) {
-        return contains_all<OtherLiteralType, _i + 1, _n_found + 1>();
-      } else {
-        return contains_all<OtherLiteralType, _i + 1, _n_found>();
-      }
-    }
+    return []<int... _is>(const std::integer_sequence<int, _is...>&) {
+      return (true && ... &&
+              OtherLiteralType::template contains<
+                  find_name_within_own_fields<_is>()>());
+    }(std::make_integer_sequence<int, num_fields_>());
   }
 
   /// Determines whether the literal has duplicate strings at compile time.
@@ -164,7 +155,7 @@ class Literal {
 
   /// Assigns the literal from a string
   Literal<fields_...>& operator=(const std::string& _str) {
-    value_ = find_value(_str);
+    value_ = find_value(_str).value();
     return *this;
   }
 
@@ -309,7 +300,7 @@ class Literal {
     const auto idx = find_value_set_idx(
         _str, &found, std::make_integer_sequence<int, num_fields_>());
     if (!found) {
-      return Error(
+      return error(
           "Literal does not support string '" + _str +
           "'. The following strings are supported: " + allowed_strings() + ".");
     }
@@ -335,18 +326,9 @@ class Literal {
   }
 
   /// Finds the value of a string literal at compile time.
-  template <internal::StringLiteral _name, int _i = 0>
+  template <internal::StringLiteral _name>
   static constexpr int find_value_of() {
-    if constexpr (_i == num_fields_) {
-      return -1;
-    } else {
-      using FieldType = tuple_element_t<_i, FieldsType>;
-      if constexpr (FieldType::name_ == _name) {
-        return _i;
-      } else {
-        return find_value_of<_name, _i + 1>();
-      }
-    }
+    return internal::find_index_or_minus_one<_name, FieldsType>();
   }
 
   /// Whether the literal contains this string.

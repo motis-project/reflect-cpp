@@ -1,6 +1,7 @@
 #ifndef RFL_ONEOF_HPP_
 #define RFL_ONEOF_HPP_
 
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -27,43 +28,39 @@ struct OneOf {
   }
 
  private:
-  static Error make_error_message(const std::vector<Error>& _errors) {
-    std::string msg = "Expected exactly 1 out of " +
-                      std::to_string(sizeof...(Cs) + 1) +
-                      " validations to pass, but " +
-                      std::to_string(sizeof...(Cs) + 1 - _errors.size()) +
-                      " of them did. The following errors were generated: ";
+  static std::string make_error_message(const std::vector<Error>& _errors) {
+    std::stringstream stream;
+    stream << "Expected exactly 1 out of " << sizeof...(Cs) + 1
+           << " validations to pass, but " << sizeof...(Cs) + 1 - _errors.size()
+           << " of them did. The following errors were generated: ";
     for (size_t i = 0; i < _errors.size(); ++i) {
-      msg += "\n" + std::to_string(i + 1) + ") " + _errors.at(i).what();
+      stream << "\n" << i + 1 << ") " << _errors.at(i).what();
     }
-    return Error(msg);
+    return stream.str();
   }
 
   template <class T, class Head, class... Tail>
   static rfl::Result<T> validate_impl(const T& _value,
                                       std::vector<Error> _errors) {
-    const auto push_back = [&](Error&& _err) -> rfl::Result<T> {
-      _errors.emplace_back(std::forward<Error>(_err));
-      return _err;
-    };
-
-    const auto next_validation = [&](rfl::Result<T>&& _r) -> rfl::Result<T> {
-      _r.or_else(push_back);
-
-      if constexpr (sizeof...(Tail) == 0) {
-        if (_errors.size() == sizeof...(Cs)) {
-          return _value;
-        }
-        return make_error_message(_errors);
-      } else {
-        return validate_impl<T, Tail...>(
-            _value, std::forward<std::vector<Error>>(_errors));
-      }
-    };
-
     return Head::validate(_value)
-        .and_then(next_validation)
-        .or_else(next_validation);
+        .and_then([&](auto&& _result) -> rfl::Result<T> {
+          if constexpr (sizeof...(Tail) == 0) {
+            if (_errors.size() == sizeof...(Cs)) {
+              return _value;
+            }
+            return error(make_error_message(_errors));
+          } else {
+            return validate_impl<T, Tail...>(_value, std::move(_errors));
+          }
+        })
+        .or_else([&](auto&& _err) -> rfl::Result<T> {
+          _errors.emplace_back(std::move(_err));
+          if constexpr (sizeof...(Tail) == 0) {
+            return error(make_error_message(_errors));
+          } else {
+            return validate_impl<T, Tail...>(_value, std::move(_errors));
+          }
+        });
   }
 };
 

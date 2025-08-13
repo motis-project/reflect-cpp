@@ -5,6 +5,7 @@
 
 #include <istream>
 #include <string>
+#include <string_view>
 
 #include "../Processors.hpp"
 #include "../internal/wrap_in_rfl_array_t.hpp"
@@ -33,8 +34,15 @@ Result<internal::wrap_in_rfl_array_t<T>> read(const std::string& _yaml_str) {
     const auto var = InputVarType(YAML::Load(_yaml_str));
     return read<T, Ps...>(var);
   } catch (std::exception& e) {
-    return Error(e.what());
+    return error(e.what());
   }
+}
+
+/// Parses an object from YAML using reflection.
+template <class T, class... Ps>
+Result<internal::wrap_in_rfl_array_t<T>> read(
+    const std::string_view _yaml_str) {
+  return read<T, Ps...>(std::string(_yaml_str));
 }
 
 /// Parses an object from a stringstream.

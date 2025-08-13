@@ -48,15 +48,14 @@ struct Reader {
   using InputVarType = YYJSONInputVar;
 
   template <class T>
-  static constexpr bool has_custom_constructor = (requires(InputVarType var) {
-    T::from_json_obj(var);
-  });
+  static constexpr bool has_custom_constructor =
+      (requires(InputVarType var) { T::from_json_obj(var); });
 
   rfl::Result<InputVarType> get_field_from_array(
       const size_t _idx, const InputArrayType _arr) const noexcept {
     const auto var = InputVarType(yyjson_arr_get(_arr.val_, _idx));
     if (!var.val_) {
-      return rfl::Error("Index " + std::to_string(_idx) + " of of bounds.");
+      return error("Index " + std::to_string(_idx) + " of of bounds.");
     }
     return var;
   }
@@ -65,7 +64,7 @@ struct Reader {
       const std::string& _name, const InputObjectType _obj) const noexcept {
     const auto var = InputVarType(yyjson_obj_get(_obj.val_, _name.c_str()));
     if (!var.val_) {
-      return rfl::Error("Object contains no field named '" + _name + "'.");
+      return error("Object contains no field named '" + _name + "'.");
     }
     return var;
   }
@@ -107,29 +106,34 @@ struct Reader {
     if constexpr (std::is_same<std::remove_cvref_t<T>, std::string>()) {
       const auto r = yyjson_get_str(_var.val_);
       if (r == NULL) {
-        return rfl::Error("Could not cast to string.");
+        return error("Could not cast to string.");
       }
       return std::string(r);
+
     } else if constexpr (std::is_same<std::remove_cvref_t<T>, bool>()) {
       if (!yyjson_is_bool(_var.val_)) {
-        return rfl::Error("Could not cast to boolean.");
+        return error("Could not cast to boolean.");
       }
       return yyjson_get_bool(_var.val_);
+
     } else if constexpr (std::is_floating_point<std::remove_cvref_t<T>>()) {
       if (!yyjson_is_num(_var.val_)) {
-        return rfl::Error("Could not cast to double.");
+        return error("Could not cast to double.");
       }
       return static_cast<T>(yyjson_get_num(_var.val_));
+
     } else if constexpr (std::is_unsigned<std::remove_cvref_t<T>>()) {
       if (!yyjson_is_int(_var.val_)) {
-        return rfl::Error("Could not cast to int.");
+        return error("Could not cast to int.");
       }
       return static_cast<T>(yyjson_get_uint(_var.val_));
+
     } else if constexpr (std::is_integral<std::remove_cvref_t<T>>()) {
       if (!yyjson_is_int(_var.val_)) {
-        return rfl::Error("Could not cast to int.");
+        return error("Could not cast to int.");
       }
       return static_cast<T>(yyjson_get_sint(_var.val_));
+
     } else {
       static_assert(rfl::always_false_v<T>, "Unsupported type.");
     }
@@ -137,7 +141,7 @@ struct Reader {
 
   rfl::Result<InputArrayType> to_array(const InputVarType _var) const noexcept {
     if (!yyjson_is_arr(_var.val_)) {
-      return rfl::Error("Could not cast to array!");
+      return error("Could not cast to array!");
     }
     return InputArrayType(_var.val_);
   }
@@ -145,7 +149,7 @@ struct Reader {
   rfl::Result<InputObjectType> to_object(
       const InputVarType _var) const noexcept {
     if (!yyjson_is_obj(_var.val_)) {
-      return rfl::Error("Could not cast to object!");
+      return error("Could not cast to object!");
     }
     return InputObjectType(_var.val_);
   }
@@ -156,7 +160,7 @@ struct Reader {
     try {
       return T::from_json_obj(_var);
     } catch (std::exception& e) {
-      return rfl::Error(e.what());
+      return error(e.what());
     }
   }
 };
@@ -164,4 +168,4 @@ struct Reader {
 }  // namespace json
 }  // namespace rfl
 
-#endif  // JSON_PARSER_HPP_
+#endif

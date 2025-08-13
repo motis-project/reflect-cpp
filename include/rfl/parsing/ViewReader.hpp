@@ -2,6 +2,7 @@
 #define RFL_PARSING_VIEWREADER_HPP_
 
 #include <array>
+#include <sstream>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -10,6 +11,8 @@
 #include "../Result.hpp"
 #include "../Tuple.hpp"
 #include "../internal/is_array.hpp"
+#include "Parser_base.hpp"
+#include "schemaful/IsSchemafulReader.hpp"
 
 namespace rfl::parsing {
 
@@ -33,19 +36,28 @@ class ViewReader {
                              std::make_integer_sequence<int, size_>());
   }
 
-  /// Because of the way we have allocated the fields, we need to manually
-  /// trigger the destructors.
-  void call_destructors_where_necessary() const {
-    [&]<int... is>(std::integer_sequence<int, is...>) {
-      (call_destructor_on_one_if_necessary<is>(), ...);
-    }
-    (std::make_integer_sequence<int, size_>());
+  /// Assigns the parsed version of _var to the field signified by _index, if
+  /// such a field exists in the underlying view.
+  /// Note that schemaful formats can assign by index.
+  void read(const int _index, const InputVarType& _var) const {
+    assign_to_matching_field(*r_, _index, _var, view_, errors_, found_, set_,
+                             std::make_integer_sequence<int, size_>());
   }
 
  private:
+  template <int i, class FieldType>
+  static bool is_matching(const int _current_index) {
+    return _current_index == i;
+  }
+
+  template <int i, class FieldType>
+  static bool is_matching(const std::string_view& _current_name) {
+    return _current_name == FieldType::name();
+  }
+
   template <int i>
   static void assign_if_field_matches(const R& _r,
-                                      const std::string_view& _current_name,
+                                      const auto _current_name_or_index,
                                       const auto& _var, auto* _view,
                                       auto* _errors, auto* _found, auto* _set,
                                       bool* _already_assigned) {
@@ -55,14 +67,15 @@ class ViewReader {
         std::remove_cvref_t<std::remove_pointer_t<typename FieldType::Type>>;
     constexpr auto name = FieldType::name();
     if (!(*_already_assigned) && !std::get<i>(*_found) &&
-        _current_name == name) {
+        is_matching<i, FieldType>(_current_name_or_index)) {
       std::get<i>(*_found) = true;
       *_already_assigned = true;
       auto res = Parser<R, W, T, ProcessorsType>::read(_r, _var);
       if (!res) {
-        _errors->emplace_back(Error("Failed to parse field '" +
-                                    std::string(name) +
-                                    "': " + std::move(res.error()->what())));
+        std::stringstream stream;
+        stream << "Failed to parse field '" << std::string(name)
+               << "': " << res.error().what();
+        _errors->emplace_back(Error(stream.str()));
         return;
       }
       if constexpr (std::is_pointer_v<OriginalType>) {
@@ -91,9 +104,10 @@ class ViewReader {
     }
     auto res = Parser<R, W, T, ProcessorsType>::read(_r, _var);
     if (!res) {
-      _errors->emplace_back(Error("Failed to parse field '" +
-                                  std::string(_current_name) +
-                                  "': " + std::move(res.error()->what())));
+      std::stringstream stream;
+      stream << "Failed to parse field '" << _current_name
+             << "': " << res.error().what();
+      _errors->emplace_back(Error(stream.str()));
       return;
     }
     extra_fields->emplace(std::string(_current_name), std::move(*res));
@@ -101,59 +115,36 @@ class ViewReader {
 
   template <int... is>
   static void assign_to_matching_field(const R& _r,
-                                       const std::string_view& _current_name,
+                                       const auto _current_name_or_index,
                                        const auto& _var, auto* _view,
                                        auto* _errors, auto* _found, auto* _set,
                                        std::integer_sequence<int, is...>) {
     bool already_assigned = false;
 
-    (assign_if_field_matches<is>(_r, _current_name, _var, _view, _errors,
-                                 _found, _set, &already_assigned),
+    (assign_if_field_matches<is>(_r, _current_name_or_index, _var, _view,
+                                 _errors, _found, _set, &already_assigned),
      ...);
 
     if constexpr (ViewType::pos_extra_fields() != -1) {
+      static_assert(!schemaful::IsSchemafulReader<R>,
+                    "rfl::ExtraFields are not supported for schemaful formats, "
+                    "because schemaful formats cannot have extra fields.");
       constexpr int pos = ViewType::pos_extra_fields();
       if (!already_assigned) {
-        assign_to_extra_fields<pos>(_r, _current_name, _var, _view, _errors,
-                                    _found, _set);
+        assign_to_extra_fields<pos>(_r, _current_name_or_index, _var, _view,
+                                    _errors, _found, _set);
       }
     } else if constexpr (ProcessorsType::no_extra_fields_) {
+      static_assert(
+          !schemaful::IsSchemafulReader<R>,
+          "Passing rfl::NoExtraFields to a schemaful format does not make "
+          "sense, because schemaful formats cannot have extra fields.");
       if (!already_assigned) {
-        _errors->emplace_back(
-            Error("Value named '" + std::string(_current_name) +
-                  "' not used. Remove the rfl::NoExtraFields processor or add "
-                  "rfl::ExtraFields to avoid this error message."));
-      }
-    }
-  }
-
-  template <class T>
-  static void call_destructor_on_array(const size_t _size, T* _ptr) {
-    for (size_t i = 0; i < _size; ++i) {
-      if constexpr (std::is_array_v<T>) {
-        call_destructor_on_array(sizeof(*_ptr) / sizeof(**_ptr), *(_ptr + i));
-      } else if constexpr (std::is_destructible_v<T>) {
-        (_ptr + i)->~T();
-      }
-    }
-  }
-
-  template <int _i>
-  void call_destructor_on_one_if_necessary() const {
-    using FieldType = tuple_element_t<_i, typename ViewType::Fields>;
-    using OriginalType = std::remove_cvref_t<typename FieldType::Type>;
-    using ValueType =
-        std::remove_cvref_t<std::remove_pointer_t<typename FieldType::Type>>;
-    if constexpr (!std::is_array_v<ValueType> &&
-                  std::is_pointer_v<OriginalType> &&
-                  std::is_destructible_v<ValueType>) {
-      if (std::get<_i>(*set_)) {
-        rfl::get<_i>(*view_)->~ValueType();
-      }
-    } else if constexpr (std::is_array_v<ValueType>) {
-      if (std::get<_i>(*set_)) {
-        auto ptr = rfl::get<_i>(*view_);
-        call_destructor_on_array(sizeof(*ptr) / sizeof(**ptr), *ptr);
+        std::stringstream stream;
+        stream << "Value named '" << _current_name_or_index
+               << "' not used. Remove the rfl::NoExtraFields processor or add "
+                  "rfl::ExtraFields to avoid this error message.";
+        _errors->emplace_back(Error(stream.str()));
       }
     }
   }

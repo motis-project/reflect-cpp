@@ -21,7 +21,7 @@ namespace parsing {
 /// To be used when all options of the variants are rfl::Field. Essentially,
 /// this is an externally tagged union.
 template <class R, class W, class ProcessorsType, class... FieldTypes>
-requires AreReaderAndWriter<R, W, rfl::Variant<FieldTypes...>>
+  requires AreReaderAndWriter<R, W, rfl::Variant<FieldTypes...>>
 struct FieldVariantParser {
   using FieldVariantType = rfl::Variant<FieldTypes...>;
   using ResultType = Result<FieldVariantType>;
@@ -29,9 +29,6 @@ struct FieldVariantParser {
  public:
   using InputObjectType = typename R::InputObjectType;
   using InputVarType = typename R::InputVarType;
-
-  using OutputObjectType = typename W::OutputObjectType;
-  using OutputVarType = typename W::OutputVarType;
 
   static ResultType read(const R& _r, const InputVarType& _var) noexcept {
     static_assert(
@@ -46,10 +43,10 @@ struct FieldVariantParser {
               &_r, &field_variant);
       auto err = _r.read_object(reader, _obj);
       if (err) {
-        return *err;
+        return error(*err);
       }
       if (!field_variant) {
-        return Error(
+        return error(
             "Could not parse: Expected the object to have "
             "exactly one field, but found more than one.");
       }
@@ -67,14 +64,12 @@ struct FieldVariantParser {
         "Externally tagged variants cannot have duplicate field "
         "names.");
 
-    const auto handle = [&](const auto& _field) {
+    _v.visit([&](const auto& _field) {
       const auto named_tuple = make_named_tuple(internal::to_ptr_field(_field));
       using NamedTupleType = std::remove_cvref_t<decltype(named_tuple)>;
       Parser<R, W, NamedTupleType, ProcessorsType>::write(_w, named_tuple,
                                                           _parent);
-    };
-
-    rfl::visit(handle, _v);
+    });
   }
 
   static schema::Type to_schema(

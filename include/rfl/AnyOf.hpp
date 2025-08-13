@@ -1,6 +1,7 @@
 #ifndef RFL_ANYOF_HPP_
 #define RFL_ANYOF_HPP_
 
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -27,23 +28,23 @@ struct AnyOf {
   }
 
  private:
-  static Error make_error_message(const std::vector<Error>& _errors) {
-    std::string msg =
-        "Expected at least one of the following validations to pass, but none "
-        "of them did:";
+  static std::string make_error_message(const std::vector<Error>& _errors) {
+    std::stringstream stream;
+    stream << "Expected at least one of the following validations to pass, but "
+              "none of them did:";
     for (size_t i = 0; i < _errors.size(); ++i) {
-      msg += "\n" + std::to_string(i + 1) + ") " + _errors.at(i).what();
+      stream << "\n" << i + 1 << ") " << _errors.at(i).what();
     }
-    return Error(msg);
+    return stream.str();
   }
 
   template <class T, class Head, class... Tail>
   static rfl::Result<T> validate_impl(const T& _value,
                                       std::vector<Error> _errors) {
-    const auto handle_err = [&](Error&& _err) {
+    const auto handle_err = [&](Error&& _err) -> rfl::Result<T> {
       _errors.push_back(std::forward<Error>(_err));
       if constexpr (sizeof...(Tail) == 0) {
-        return make_error_message(_errors);
+        return error(make_error_message(_errors));
       } else {
         return validate_impl<T, Tail...>(
             _value, std::forward<std::vector<Error>>(_errors));

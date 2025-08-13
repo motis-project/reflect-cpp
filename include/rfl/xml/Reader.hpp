@@ -1,20 +1,13 @@
 #ifndef RFL_XML_READER_HPP_
 #define RFL_XML_READER_HPP_
 
-#include <array>
 #include <exception>
-#include <map>
-#include <memory>
 #include <optional>
 #include <pugixml.hpp>
-#include <sstream>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
-#include <unordered_map>
 #include <variant>
-#include <vector>
 
 #include "../Result.hpp"
 #include "../always_false.hpp"
@@ -49,22 +42,6 @@ struct Reader {
   template <class T>
   static constexpr bool has_custom_constructor = false;
 
-  /// XML-only helper function. This is needed because XML distinguishes between
-  /// nodes and attributes.
-  static rfl::Result<pugi::xml_node> cast_as_node(
-      const std::variant<pugi::xml_node, pugi::xml_attribute>&
-          _node_or_attribute) {
-    const auto cast = [](const auto& _n) -> Result<pugi::xml_node> {
-      using Type = std::remove_cvref_t<decltype(_n)>;
-      if constexpr (std::is_same<Type, pugi::xml_node>()) {
-        return _n;
-      } else {
-        return Error("Field '" + std::string(_n.name()) + "' is an attribute.");
-      }
-    };
-    return std::visit(cast, _node_or_attribute);
-  }
-
   rfl::Result<InputVarType> get_field_from_array(
       const size_t _idx, const InputArrayType& _arr) const noexcept {
     const auto name = _arr.node_.name();
@@ -74,14 +51,14 @@ struct Reader {
         return InputVarType(node);
       }
     }
-    return rfl::Error("Index " + std::to_string(_idx) + " of of bounds.");
+    return error("Index " + std::to_string(_idx) + " of of bounds.");
   }
 
   rfl::Result<InputVarType> get_field_from_object(
       const std::string& _name, const InputObjectType _obj) const noexcept {
     const auto node = _obj.node_.child(_name.c_str());
     if (!node) {
-      return rfl::Error("Object contains no field named '" + _name + "'.");
+      return error("Object contains no field named '" + _name + "'.");
     }
     return InputVarType(node);
   }
@@ -106,23 +83,27 @@ struct Reader {
 
     if constexpr (std::is_same<std::remove_cvref_t<T>, std::string>()) {
       return std::visit(get_value, _var.node_or_attribute_);
+
     } else if constexpr (std::is_same<std::remove_cvref_t<T>, bool>()) {
       return std::visit(get_value, _var.node_or_attribute_) == "true";
+
     } else if constexpr (std::is_floating_point<std::remove_cvref_t<T>>()) {
       const auto str = std::visit(get_value, _var.node_or_attribute_);
       try {
         return static_cast<T>(std::stod(str));
       } catch (std::exception& e) {
-        return Error("Could not cast '" + std::string(str) +
+        return error("Could not cast '" + std::string(str) +
                      "' to floating point value.");
       }
+
     } else if constexpr (std::is_integral<std::remove_cvref_t<T>>()) {
       const auto str = std::visit(get_value, _var.node_or_attribute_);
       try {
         return static_cast<T>(std::stoi(str));
       } catch (std::exception& e) {
-        return Error("Could not cast '" + std::string(str) + "' to integer.");
+        return error("Could not cast '" + std::string(str) + "' to integer.");
       }
+
     } else {
       static_assert(rfl::always_false_v<T>, "Unsupported type.");
     }
@@ -176,7 +157,24 @@ struct Reader {
   template <class T>
   rfl::Result<T> use_custom_constructor(
       const InputVarType _var) const noexcept {
-    return rfl::Error("TODO");
+    return error("TODO");
+  }
+
+ private:
+  /// XML-only helper function. This is needed because XML distinguishes between
+  /// nodes and attributes.
+  static rfl::Result<pugi::xml_node> cast_as_node(
+      const std::variant<pugi::xml_node, pugi::xml_attribute>&
+          _node_or_attribute) {
+    const auto cast = [](const auto& _n) -> Result<pugi::xml_node> {
+      using Type = std::remove_cvref_t<decltype(_n)>;
+      if constexpr (std::is_same<Type, pugi::xml_node>()) {
+        return _n;
+      } else {
+        return error("Field '" + std::string(_n.name()) + "' is an attribute.");
+      }
+    };
+    return std::visit(cast, _node_or_attribute);
   }
 };
 

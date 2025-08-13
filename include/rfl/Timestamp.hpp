@@ -3,9 +3,6 @@
 
 #include <ctime>
 #include <iomanip>
-#include <iostream>
-#include <iterator>
-#include <locale>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -24,6 +21,8 @@ class Timestamp {
   using Format = rfl::Literal<_format>;
 
   using ReflectionType = std::string;
+
+  Timestamp() : tm_(std::tm{}) {}
 
   Timestamp(const char* _str) : tm_(std::tm{}) {
     const auto r = strptime(_str, _format.str().c_str(), &tm_);
@@ -46,7 +45,7 @@ class Timestamp {
     try {
       return Timestamp(_str);
     } catch (std::exception& e) {
-      return Error(e.what());
+      return error(e.what());
     }
   }
 
@@ -73,8 +72,8 @@ class Timestamp {
   const std::tm& tm() const { return tm_; }
 
  private:
-#ifdef _MSC_VER
-  // This workaround is necessary, because MSVC doesn't support strptime.
+#if defined(_MSC_VER) || defined(__MINGW32__)
+  // This workaround is necessary, because strptime is not available on Windows.
   char* strptime(const char* _s, const char* _f, std::tm* _tm) {
     std::istringstream input(_s);
     input.imbue(std::locale(setlocale(LC_ALL, nullptr)));

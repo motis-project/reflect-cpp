@@ -10,57 +10,83 @@
 #include "../Tuple.hpp"
 #include "../always_false.hpp"
 #include "../internal/nth_element_t.hpp"
+#include "../internal/ptr_cast.hpp"
 #include "Parent.hpp"
 #include "TupleReader.hpp"
+#include "call_destructors_on_tuple_where_necessary.hpp"
 #include "schema/Type.hpp"
+#include "schemaful/IsSchemafulReader.hpp"
+#include "schemaful/IsSchemafulWriter.hpp"
+#include "schemaful/tuple_to_named_tuple.hpp"
+#include "schemaful/tuple_to_named_tuple_t.hpp"
 
 namespace rfl::parsing {
 
 template <class R, class W, bool _ignore_empty_containers, bool _all_required,
           class ProcessorsType, class TupleType>
-requires AreReaderAndWriter<R, W, TupleType>
+  requires AreReaderAndWriter<R, W, TupleType>
 struct TupleParser {
  public:
   using InputArrayType = typename R::InputArrayType;
   using InputVarType = typename R::InputVarType;
 
-  using OutputArrayType = typename W::OutputArrayType;
-  using OutputVarType = typename W::OutputVarType;
-
   using ParentType = Parent<W>;
 
   static Result<TupleType> read(const R& _r,
                                 const InputVarType& _var) noexcept {
-    const auto parse = [&](const InputArrayType& _arr) -> Result<TupleType> {
-      alignas(TupleType) unsigned char buf[sizeof(TupleType)];
-      auto ptr = std::launder(reinterpret_cast<TupleType*>(buf));
-      const auto tuple_reader =
-          TupleReader<R, W, TupleType, _ignore_empty_containers, _all_required,
-                      ProcessorsType>(&_r, ptr);
-      auto err = _r.read_array(tuple_reader, _arr);
-      if (err) {
-        tuple_reader.call_destructors_where_necessary();
-        return *err;
-      }
-      err = tuple_reader.handle_missing_fields();
-      if (err) {
-        tuple_reader.call_destructors_where_necessary();
-        return *err;
-      }
-      return std::move(*ptr);
-    };
+    if constexpr (schemaful::IsSchemafulReader<R>) {
+      using NamedTupleType = schemaful::tuple_to_named_tuple_t<TupleType>;
+      const auto to_tuple = [](auto&& _named_tuple) {
+        return [&]<int... _is>(std::integer_sequence<int, _is...>) {
+          return TupleType(std::move(rfl::get<_is>(_named_tuple))...);
+        }(std::make_integer_sequence<int, NamedTupleType::size()>());
+      };
+      return Parser<R, W, NamedTupleType, ProcessorsType>::read(_r, _var)
+          .transform(to_tuple);
 
-    return _r.to_array(_var).and_then(parse);
+    } else {
+      const auto parse = [&](const InputArrayType& _arr) -> Result<TupleType> {
+        alignas(TupleType) unsigned char buf[sizeof(TupleType)]{};
+        auto ptr = internal::ptr_cast<TupleType*>(&buf);
+        const auto tuple_reader =
+            TupleReader<R, W, TupleType, _ignore_empty_containers,
+                        _all_required, ProcessorsType>(&_r, ptr);
+        auto err = _r.read_array(tuple_reader, _arr);
+        if (err) {
+          call_destructors_on_tuple_where_necessary(tuple_reader.num_set(),
+                                                    ptr);
+          return error(*err);
+        }
+        err = tuple_reader.handle_missing_fields();
+        if (err) {
+          call_destructors_on_tuple_where_necessary(tuple_reader.num_set(),
+                                                    ptr);
+          return error(*err);
+        }
+        auto res = Result<TupleType>(std::move(*ptr));
+        call_destructors_on_tuple_where_necessary(tuple_reader.num_set(), ptr);
+        return res;
+      };
+
+      return _r.to_array(_var).and_then(parse);
+    }
   }
 
   template <class P>
   static void write(const W& _w, const TupleType& _tup,
                     const P& _parent) noexcept {
-    constexpr auto size = rfl::tuple_size_v<TupleType>;
-    auto arr = ParentType::add_array(_w, size, _parent);
-    const auto new_parent = typename ParentType::Array{&arr};
-    to_array(_w, _tup, new_parent, std::make_integer_sequence<int, size>());
-    _w.end_array(&arr);
+    if constexpr (schemaful::IsSchemafulWriter<W>) {
+      const auto named_tuple = schemaful::tuple_to_named_tuple(_tup);
+      Parser<R, W, std::remove_cvref_t<decltype(named_tuple)>,
+             ProcessorsType>::write(_w, named_tuple, _parent);
+
+    } else {
+      constexpr auto size = rfl::tuple_size_v<TupleType>;
+      auto arr = ParentType::add_array(_w, size, _parent);
+      const auto new_parent = typename ParentType::Array{&arr};
+      to_array(_w, _tup, new_parent, std::make_integer_sequence<int, size>());
+      _w.end_array(&arr);
+    }
   }
 
   static schema::Type to_schema(

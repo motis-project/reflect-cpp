@@ -15,7 +15,9 @@
 
 #include "../Bytestring.hpp"
 #include "../Result.hpp"
+#include "../Vectorstring.hpp"
 #include "../always_false.hpp"
+#include "../internal/ptr_cast.hpp"
 
 namespace rfl {
 namespace flexbuf {
@@ -46,7 +48,7 @@ struct Reader {
   rfl::Result<InputVarType> get_field_from_array(
       const size_t _idx, const InputArrayType& _arr) const noexcept {
     if (_idx >= _arr.size()) {
-      return rfl::Error("Index " + std::to_string(_idx) + " of of bounds.");
+      return error("Index " + std::to_string(_idx) + " of of bounds.");
     }
     return _arr[_idx];
   }
@@ -59,8 +61,7 @@ struct Reader {
         return _obj.Values()[i];
       }
     }
-    return rfl::Error("Map does not contain any element called '" + _name +
-                      "'.");
+    return error("Map does not contain any element called '" + _name + "'.");
   }
 
   bool is_empty(const InputVarType& _var) const noexcept {
@@ -71,32 +72,46 @@ struct Reader {
   rfl::Result<T> to_basic_type(const InputVarType& _var) const noexcept {
     if constexpr (std::is_same<std::remove_cvref_t<T>, std::string>()) {
       if (!_var.IsString()) {
-        return rfl::Error("Could not cast to a string.");
+        return error("Could not cast to a string.");
       }
       return std::string(_var.AsString().c_str());
+
     } else if constexpr (std::is_same<std::remove_cvref_t<T>,
-                                      rfl::Bytestring>()) {
+                                      rfl::Bytestring>() ||
+                         std::is_same<std::remove_cvref_t<T>,
+                                      rfl::Vectorstring>()) {
+      using VectorType = std::remove_cvref_t<T>;
+      using ValueType = typename VectorType::value_type;
       if (!_var.IsBlob()) {
-        return rfl::Error("Could not cast to a bytestring.");
+        if constexpr (std::is_same<std::remove_cvref_t<T>,
+                                      rfl::Bytestring>()) {
+          return error("Could not cast to bytestring.");
+        } else {
+          return error("Could not cast to vectorstring.");
+        }
       }
       const auto blob = _var.AsBlob();
-      return rfl::Bytestring(reinterpret_cast<const std::byte*>(blob.data()),
-                             blob.size());
+      const auto data = internal::ptr_cast<const ValueType*>(blob.data());
+      return VectorType(data, data + blob.size());
+
     } else if constexpr (std::is_same<std::remove_cvref_t<T>, bool>()) {
       if (!_var.IsBool()) {
-        return rfl::Error("Could not cast to boolean.");
+        return error("Could not cast to boolean.");
       }
       return _var.AsBool();
+
     } else if constexpr (std::is_floating_point<std::remove_cvref_t<T>>()) {
-      if (!_var.IsNumeric()) {
-        return rfl::Error("Could not cast to double.");
+      if (!_var.IsFloat()) {
+        return error("Could not cast to double.");
       }
       return static_cast<T>(_var.AsDouble());
+
     } else if constexpr (std::is_integral<std::remove_cvref_t<T>>()) {
-      if (!_var.IsNumeric()) {
-        return rfl::Error("Could not cast to int.");
+      if (!_var.IsIntOrUint()) {
+        return error("Could not cast to int.");
       }
       return static_cast<T>(_var.AsInt64());
+
     } else {
       static_assert(rfl::always_false_v<T>, "Unsupported type.");
     }
@@ -133,7 +148,7 @@ struct Reader {
   rfl::Result<InputArrayType> to_array(
       const InputVarType& _var) const noexcept {
     if (!_var.IsVector()) {
-      return rfl::Error("Could not cast to Vector.");
+      return error("Could not cast to Vector.");
     }
     return _var.AsVector();
   }
@@ -141,7 +156,7 @@ struct Reader {
   rfl::Result<InputObjectType> to_object(
       const InputVarType& _var) const noexcept {
     if (!_var.IsMap()) {
-      return rfl::Error("Could not cast to Map!");
+      return error("Could not cast to Map!");
     }
     return _var.AsMap();
   }
@@ -152,7 +167,7 @@ struct Reader {
     try {
       return T::from_flexbuf(_var);
     } catch (std::exception& e) {
-      return rfl::Error(e.what());
+      return error(e.what());
     }
   }
 };

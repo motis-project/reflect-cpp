@@ -2,6 +2,7 @@
 #define RFL_PARSING_VIEWREADERWITHDEFAULT_HPP_
 
 #include <array>
+#include <sstream>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -22,14 +23,16 @@ class ViewReaderWithDefault {
  public:
   ViewReaderWithDefault(const R* _r, ViewType* _view,
                         std::vector<Error>* _errors)
-      : r_(_r), view_(_view), errors_(_errors) {}
+      : r_(_r), view_(_view), errors_(_errors) {
+    found_->fill(false);
+  }
 
   ~ViewReaderWithDefault() = default;
 
   /// Assigns the parsed version of _var to the field signified by _name, if
   /// such a field exists in the underlying view.
   void read(const std::string_view& _name, const InputVarType& _var) const {
-    assign_to_matching_field(*r_, _name, _var, view_, errors_,
+    assign_to_matching_field(*r_, _name, _var, view_, errors_, found_.get(),
                              std::make_integer_sequence<int, size_>());
   }
 
@@ -38,19 +41,23 @@ class ViewReaderWithDefault {
   static void assign_if_field_matches(const R& _r,
                                       const std::string_view& _current_name,
                                       const auto& _var, auto* _view,
-                                      auto* _errors, bool* _already_assigned) {
+                                      auto* _errors, auto* _found,
+                                      bool* _already_assigned) {
     using FieldType = tuple_element_t<i, typename ViewType::Fields>;
     using OriginalType = typename FieldType::Type;
     using T =
         std::remove_cvref_t<std::remove_pointer_t<typename FieldType::Type>>;
     constexpr auto name = FieldType::name();
-    if (!(*_already_assigned) && _current_name == name) {
+    if (!(*_already_assigned) && !std::get<i>(*_found) &&
+        _current_name == name) {
+      std::get<i>(*_found) = true;
       *_already_assigned = true;
       auto res = Parser<R, W, T, ProcessorsType>::read(_r, _var);
       if (!res) {
-        _errors->emplace_back(Error("Failed to parse field '" +
-                                    std::string(name) +
-                                    "': " + std::move(res.error()->what())));
+        std::stringstream stream;
+        stream << "Failed to parse field '" << std::string(name)
+               << "': " << res.error().what();
+        _errors->emplace_back(Error(stream.str()));
         return;
       }
       if constexpr (std::is_pointer_v<OriginalType>) {
@@ -73,9 +80,10 @@ class ViewReaderWithDefault {
         std::remove_pointer_t<typename ExtraFieldsType::Type>>;
     auto res = Parser<R, W, T, ProcessorsType>::read(_r, _var);
     if (!res) {
-      _errors->emplace_back(Error("Failed to parse field '" +
-                                  std::string(_current_name) +
-                                  "': " + std::move(res.error()->what())));
+      std::stringstream stream;
+      stream << "Failed to parse field '" << _current_name
+             << "': " << res.error().what();
+      _errors->emplace_back(Error(stream.str()));
       return;
     }
     extra_fields->emplace(std::string(_current_name), std::move(*res));
@@ -85,12 +93,12 @@ class ViewReaderWithDefault {
   static void assign_to_matching_field(const R& _r,
                                        const std::string_view& _current_name,
                                        const auto& _var, auto* _view,
-                                       auto* _errors,
+                                       auto* _errors, auto* _found,
                                        std::integer_sequence<int, is...>) {
     bool already_assigned = false;
 
     (assign_if_field_matches<is>(_r, _current_name, _var, _view, _errors,
-                                 &already_assigned),
+                                 _found, &already_assigned),
      ...);
 
     if constexpr (ViewType::pos_extra_fields() != -1) {
@@ -100,10 +108,11 @@ class ViewReaderWithDefault {
       }
     } else if constexpr (ProcessorsType::no_extra_fields_) {
       if (!already_assigned) {
-        _errors->emplace_back(
-            Error("Value named '" + std::string(_current_name) +
-                  "' not used. Remove the rfl::NoExtraFields processor or add "
-                  "rfl::ExtraFields to avoid this error message."));
+        std::stringstream stream;
+        stream << "Value named '" << std::string(_current_name)
+               << "' not used. Remove the rfl::NoExtraFields processor or add "
+                  "rfl::ExtraFields to avoid this error message.";
+        _errors->emplace_back(Error(stream.str()));
       }
     }
   }
@@ -134,6 +143,9 @@ class ViewReaderWithDefault {
 
   /// The underlying view.
   ViewType* view_;
+
+  /// Indicates that a certain field has been found.
+  rfl::Ref<std::array<bool, size_>> found_;
 
   /// Collects any errors we may have come across.
   std::vector<Error>* errors_;

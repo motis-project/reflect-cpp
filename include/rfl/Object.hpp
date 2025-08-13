@@ -90,27 +90,23 @@ class Object {
   /// The number of elements currently inside the object.
   auto size() const { return data_.size(); }
 
+  std::size_t count(const key_type& key) const { return std::count_if(cbegin(), cend(), [&](const auto& p) { return p.first == key; }); }
+
   /// The maximum possible size.
   auto max_size() const { return data_.max_size(); }
 
   /// Inserts a new element at the end.
-  void insert(const value_type& _value) {
-    data_.push_back(_value);
+  template <class... Args>
+  void insert(const Args&... _values) {
+    (data_.push_back(_values), ...);
     i_ = 0;
   }
 
   /// Inserts a new element at the end.
-  void insert(value_type&& _value) {
-    data_.emplace_back(std::move(_value));
+  template <class... Args>
+  void insert(Args&&... _values) {
+    (data_.emplace_back(std::move(_values)), ...);
     i_ = 0;
-  }
-
-  /// Inserts several new elements at the end.
-  template <class InputIt>
-  void insert(InputIt _first, InputIt _last) {
-    for (auto it = _first; it != _last; ++it) {
-      insert(*it);
-    }
   }
 
   /// Inserts a new element at the end.
@@ -128,6 +124,16 @@ class Object {
     insert(std::make_pair(std::move(_k), std::move(_v)));
   }
 
+  /// Inserts a new element at the end.
+  void insert(const std::string_view& _k, const T& _v) {
+    insert(std::make_pair(std::string(_k), _v));
+  }
+
+  /// Inserts a new element at the end.
+  void insert(const std::string_view& _k, T&& _v) {
+    insert(std::make_pair(std::string(_k), std::move(_v)));
+  }
+
   /// Alias for insert that primarily exists for compatability with standard
   /// containers.
   template <class... Args>
@@ -140,6 +146,22 @@ class Object {
   template <class... Args>
   void emplace(const Args&... _args) {
     insert(_args...);
+  }
+
+  /// Inserts several new elements at the end.
+  template <class InputIt>
+  void insert_range(InputIt _first, InputIt _last) {
+    for (auto it = _first; it != _last; ++it) {
+      insert(*it);
+    }
+  }
+
+  /// Inserts several new elements at the end.
+  template <class RangeType>
+  void insert_range(RangeType _range) {
+    for (const auto& val : _range) {
+      insert(val);
+    }
   }
 
   /// Returns the element signified by the key or creates a new one.
@@ -192,20 +214,20 @@ class Object {
   Result<T> get(const std::string& _key) const noexcept {
     const auto i = find(_key);
     if (i == size()) {
-      return Error("Key named '" + _key + "' not found.");
+      return error("Key named '" + _key + "' not found.");
     }
     return data_[i].second;
   }
 
  private:
   size_t find(const std::string& _key) const {
-    for (auto i = i_; i < size(); ++i) {
+    for (size_t i = i_; i < size(); ++i) {
       if (data_[i].first == _key) {
         i_ = i + 1;
         return i;
       }
     }
-    for (auto i = 0; i < i_; ++i) {
+    for (size_t i = 0; i < i_; ++i) {
       if (data_[i].first == _key) {
         i_ = i + 1;
         return i;
