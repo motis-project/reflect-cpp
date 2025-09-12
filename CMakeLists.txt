@@ -300,9 +300,6 @@ endif ()
 
 set_target_properties(reflectcpp PROPERTIES LINKER_LANGUAGE CXX)
 target_sources(reflectcpp PRIVATE ${REFLECT_CPP_SOURCES})
-if (NOT MSVC)
-    target_precompile_headers(reflectcpp PRIVATE [["rfl.hpp"]] <iostream> <string> <functional>)
-endif()
 
 if (REFLECTCPP_BUILD_TESTS)
     enable_testing()
